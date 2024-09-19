@@ -8,15 +8,17 @@ import (
 	"log"
 	"net"
 
-	"github.com/brianvoe/gofakeit"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	// sq "github.com/Masterminds/squirrel"
 
 	"github.com/asp3cto/auth/internal/config"
+	"github.com/asp3cto/auth/internal/converter"
+	userRepo "github.com/asp3cto/auth/internal/repository/user"
+	"github.com/asp3cto/auth/internal/service"
+	userService "github.com/asp3cto/auth/internal/service/user"
 	desc "github.com/asp3cto/auth/pkg/user_v1"
 )
 
@@ -28,23 +30,34 @@ func init() {
 
 type server struct {
 	desc.UnimplementedUserV1Server
-	// pool *pgxpool.Pool
+	userService service.UserService
 }
 
 // Get ...
 func (s *server) Get(ctx context.Context, req *desc.GetRequest) (*desc.GetResponse, error) {
-	log.Printf("Note id: %d", req.GetId())
-	log.Println(ctx)
+	user, err := s.userService.Get(ctx, req.GetId())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("%#v", user)
 
 	return &desc.GetResponse{
-		User: &desc.User{
-			Id:        req.GetId(),
-			Name:      gofakeit.Name(),
-			Email:     gofakeit.Email(),
-			Role:      desc.Role_user,
-			CreatedAt: timestamppb.New(gofakeit.Date()),
-			UpdatedAt: timestamppb.New(gofakeit.Date()),
-		},
+		User: converter.ToUserFromService(user),
+	}, nil
+}
+
+// Create ...
+func (s *server) Create(ctx context.Context, req *desc.CreateRequest) (*desc.CreateResponse, error) {
+	id, err := s.userService.Create(ctx, converter.ToUserInfoFromDesc(req.GetInfo()))
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("Inserted user with id: %d", id)
+
+	return &desc.CreateResponse{
+		Id: id,
 	}, nil
 }
 
@@ -78,9 +91,12 @@ func main() {
 	}
 	defer pool.Close()
 
+	userRepo := userRepo.NewRepository(pool)
+	userServ := userService.NewService(userRepo)
+
 	s := grpc.NewServer()
 	reflection.Register(s)
-	desc.RegisterUserV1Server(s, &server{})
+	desc.RegisterUserV1Server(s, &server{userService: userServ})
 
 	log.Printf("server listening at %v", lis.Addr())
 
