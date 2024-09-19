@@ -1,9 +1,9 @@
 -- +goose Up
 CREATE TABLE "user" (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(255),
-    email VARCHAR(255),
-    created_at TIMESTAMP,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP
 );
 
