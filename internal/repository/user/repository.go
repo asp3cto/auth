@@ -4,11 +4,12 @@ import (
 	"context"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/asp3cto/auth/internal/client/db"
 	serviceModel "github.com/asp3cto/auth/internal/model"
 	"github.com/asp3cto/auth/internal/repository"
 	"github.com/asp3cto/auth/internal/repository/user/converter"
 	"github.com/asp3cto/auth/internal/repository/user/model"
-	"github.com/jackc/pgx/v4/pgxpool"
+	// "github.com/jackc/pgx/v4/pgxpool"
 )
 
 const (
@@ -21,17 +22,18 @@ const (
 )
 
 type repo struct {
-	db *pgxpool.Pool
+	db db.Client
 }
 
 // NewRepository ...
-func NewRepository(db *pgxpool.Pool) repository.UserRepository {
+func NewRepository(db db.Client) repository.UserRepository {
 	return &repo{db: db}
 }
 
 // Create ...
 func (r *repo) Create(ctx context.Context, info *serviceModel.UserInfo) (int64, error) {
-	builder := sq.Insert(tablename).PlaceholderFormat(sq.Dollar).
+	builder := sq.Insert(tablename).
+		PlaceholderFormat(sq.Dollar).
 		Columns(nameColumn, emailColumn).
 		Values(info.Name, info.Email).
 		Suffix("RETURNING id")
@@ -41,8 +43,13 @@ func (r *repo) Create(ctx context.Context, info *serviceModel.UserInfo) (int64, 
 		return 0, err
 	}
 
+	q := db.Query{
+		Name:     "user_repository.Create",
+		QueryRaw: query,
+	}
+
 	var id int64
-	err = r.db.QueryRow(ctx, query, args...).Scan(&id)
+	err = r.db.DB().QueryRowContext(ctx, q, args...).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -62,8 +69,13 @@ func (r *repo) Get(ctx context.Context, id int64) (*serviceModel.User, error) {
 		return nil, err
 	}
 
+	q := db.Query{
+		Name:     "user_repository.Get",
+		QueryRaw: query,
+	}
+
 	var user model.User
-	err = r.db.QueryRow(ctx, query, args...).Scan(&user.ID, &user.Info.Name, &user.Info.Email, &user.CreatedAt, &user.UpdatedAt)
+	err = r.db.DB().ScanOneContext(ctx, &user, q, args...)
 	if err != nil {
 		return nil, err
 	}
