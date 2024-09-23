@@ -5,11 +5,13 @@ import (
 	"log"
 
 	"github.com/asp3cto/auth/internal/api/user"
+	"github.com/asp3cto/auth/internal/client/db"
+	"github.com/asp3cto/auth/internal/client/db/pg"
+	"github.com/asp3cto/auth/internal/client/db/transaction"
 	"github.com/asp3cto/auth/internal/closer"
 	"github.com/asp3cto/auth/internal/config"
 	"github.com/asp3cto/auth/internal/repository"
 	"github.com/asp3cto/auth/internal/service"
-	"github.com/jackc/pgx/v4/pgxpool"
 
 	userRepo "github.com/asp3cto/auth/internal/repository/user"
 	userService "github.com/asp3cto/auth/internal/service/user"
@@ -19,7 +21,8 @@ type serviceProvider struct {
 	pgConfig   config.PGConfig
 	grpcConfig config.GRPCConfig
 
-	pgPool *pgxpool.Pool
+	dbClient  db.Client
+	txManager db.TxManager
 
 	userRepository repository.UserRepository
 	userService    service.UserService
@@ -53,30 +56,35 @@ func (s *serviceProvider) GRPCConfig() config.GRPCConfig {
 	return s.grpcConfig
 }
 
-func (s *serviceProvider) PgPool(ctx context.Context) *pgxpool.Pool {
-	if s.pgPool == nil {
-		pool, err := pgxpool.Connect(ctx, s.PGConfig().DSN())
+func (s *serviceProvider) TxManager(ctx context.Context) db.TxManager {
+	if s.txManager == nil {
+		s.txManager = transaction.NewTransactionManager(s.DBClient(ctx).DB())
+	}
+
+	return s.txManager
+}
+
+func (s *serviceProvider) DBClient(ctx context.Context) db.Client {
+	if s.dbClient == nil {
+		cl, err := pg.New(ctx, s.PGConfig().DSN())
 		if err != nil {
 			log.Fatalf("failed to connect to db: %s", err.Error())
 		}
-		err = pool.Ping(ctx)
+		err = cl.DB().Ping(ctx)
 		if err != nil {
 			log.Fatalf("ping error: %s", err.Error())
 		}
 
-		closer.Add(func() error {
-			pool.Close()
-			return nil
-		})
+		closer.Add(cl.Close)
 
-		s.pgPool = pool
+		s.dbClient = cl
 	}
-	return s.pgPool
+	return s.dbClient
 }
 
 func (s *serviceProvider) UserRepository(ctx context.Context) repository.UserRepository {
 	if s.userRepository == nil {
-		s.userRepository = userRepo.NewRepository(s.PgPool(ctx))
+		s.userRepository = userRepo.NewRepository(s.DBClient(ctx))
 	}
 
 	return s.userRepository
@@ -84,7 +92,7 @@ func (s *serviceProvider) UserRepository(ctx context.Context) repository.UserRep
 
 func (s *serviceProvider) UserService(ctx context.Context) service.UserService {
 	if s.userService == nil {
-		s.userService = userService.NewService(s.UserRepository(ctx))
+		s.userService = userService.NewService(s.UserRepository(ctx), s.TxManager(ctx))
 	}
 
 	return s.userService
